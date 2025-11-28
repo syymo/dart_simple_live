@@ -1,21 +1,36 @@
 name: app-build-action
-#推送Tag时触发
+# 推送Tag时触发
 on:
   push:
     tags:
-      - "v*"
+      - "v*"  # 当推送标签以 "v" 开头时触发
+  workflow_dispatch:  # 增加了手动触发功能
+    inputs:
+      build_target:
+        description: '选择构建的目标平台'
+        required: true
+        default: 'all'  # 默认值为 all，表示构建所有平台
+        options:
+          - macos
+          - linux
+          - windows
+          - ios
+          - android
+          - all  # 可以选择构建所有平台
+
 jobs:
+  # 打包 macOS、iOS 和 Android
   build-mac-ios-android:
     runs-on: macos-latest
     permissions:
       contents: write
     steps:
-      #签出代码
+      # 签出代码
       - uses: actions/checkout@v4
         with:
           ref: master
 
-      #APK签名设置
+      # APK 签名设置
       - name: Download Android keystore
         id: android_keystore
         uses: timheuer/base64-to-file@v1.2
@@ -29,46 +44,47 @@ jobs:
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> simple_live_app/android/key.properties
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> simple_live_app/android/key.properties
 
-      #设置JAVA环境
+      # 设置 JAVA 环境
       - uses: actions/setup-java@v4
         with:
           distribution: "zulu"
           java-version: "17"
           cache: "gradle"
 
-      #设置Flutter
+      # 设置 Flutter 环境
       - name: Flutter action
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.38.x"
           cache: true
 
-      # 打开MAC Desktop支持
+      # 打开 macOS Desktop 支持
       - name: Enable Flutter Desktop
         run: flutter config --enable-macos-desktop
 
-      #更新Flutter的packages
+      # 更新 Flutter 的 packages
       - name: Restore packages
         run: |
           cd simple_live_app
           flutter pub get
 
-      # 安装appdmg npm install -g appdmg
+      # 安装 appdmg
       - name: Install appdmg
         run: npm install -g appdmg
 
-      # 设置flutter_distributor环境
+      # 设置 flutter_distributor 环境
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
 
-      #打包APK
+      # 根据选择的平台构建
       - name: Build APK
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'android' }}
         run: |
           cd simple_live_app
           flutter build apk --release --split-per-abi
 
-      #上传APK至Artifacts
       - name: Upload APK to Artifacts
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'android' }}
         uses: actions/upload-artifact@v4
         with:
           name: android
@@ -77,14 +93,14 @@ jobs:
             simple_live_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
             simple_live_app/build/app/outputs/flutter-apk/app-x86_64-release.apk
 
-      #打包iOS
       - name: Build IPA
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'ios' }}
         run: |
           cd simple_live_app
           flutter build ios --release --no-codesign
 
-      #创建未签名ipa
       - name: Create IPA
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'ios' }}
         run: |
           cd simple_live_app
           mkdir build/ios/iphoneos/Payload
@@ -93,22 +109,22 @@ jobs:
           zip -q -r ios_no_sign.ipa Payload
           cd ../../..
 
-      #上传IPA至Artifacts
       - name: Upload IPA to Artifacts
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'ios' }}
         uses: actions/upload-artifact@v4
         with:
           name: ios
           path: |
             simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
 
-      # 打包MAC
-      - name: Build MacOS
+      - name: Build macOS
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'macos' }}
         run: |
           cd simple_live_app
           flutter_distributor package --platform macos --targets dmg,zip --skip-clean
 
-      # 上传MAC至Artifacts
-      - name: Upload MacOS to Artifacts
+      - name: Upload macOS to Artifacts
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'macos' }}
         uses: actions/upload-artifact@v4
         with:
           name: mac
@@ -116,7 +132,7 @@ jobs:
             simple_live_app/build/dist/*/*.dmg
             simple_live_app/build/dist/*/*.zip
 
-      #读取版本信息
+      # 读取版本信息
       - name: Read version
         id: version
         uses: juliangruber/read-file-action@v1
@@ -127,7 +143,7 @@ jobs:
       - name: Echo version content
         run: echo "${{ fromJson(steps.version.outputs.content).version_desc }}"
 
-      #上传至Release
+      # 上传至 Release
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
@@ -142,10 +158,9 @@ jobs:
             simple_live_app/build/ios/iphoneos/ios_no_sign.ipa
             simple_live_app/build/dist/*/*.dmg
             simple_live_app/build/dist/*/*.zip
-      #完成
       - run: echo "🍏 This job's status is ${{ job.status }}."
 
-  # 打包Linux
+  # 打包 Linux
   build-linux:
     runs-on: ubuntu-22.04
     permissions:
@@ -155,7 +170,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: master
-      # 设置Flutter环境
+      # 设置 Flutter 环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -166,24 +181,26 @@ jobs:
         run: sudo apt-get update
       - name: Install Dependencies
         run: sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libmpv-dev mpv
-      # 打开Linux Desktop支持
+      # 打开 Linux Desktop 支持
       - name: Enable Flutter Desktop
         run: flutter config --enable-linux-desktop
-      # 更新Flutter的packages
+      # 更新 Flutter 的 packages
       - name: Restore Packages
         run: |
           cd simple_live_app
           flutter pub get
-      # 设置flutter_distributor环境
+      # 设置 flutter_distributor 环境
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
       # build Linux ZIP\DMG
       - name: Build Linux
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'linux' }}
         run: |
           cd simple_live_app
           flutter_distributor package --platform linux --targets deb,zip --skip-clean
-      # 上传Linux包至Artifacts
+      # 上传 Linux 包至 Artifacts
       - name: Upload Linux APP to Artifacts
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'linux' }}
         uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -202,7 +219,7 @@ jobs:
       - name: Echo version content
         run: echo "${{ fromJson(steps.version.outputs.content).version_desc }}"
 
-      #上传至Release
+      # 上传至 Release
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
@@ -213,10 +230,9 @@ jobs:
           files: |
             simple_live_app/build/dist/*/*.deb
             simple_live_app/build/dist/*/*.zip
-        #完成
       - run: echo "🍏 Linux job's status is ${{ job.status }}."
 
-  # 打包Windows
+  # 打包 Windows
   build-windows:
     runs-on: windows-latest
     permissions:
@@ -226,7 +242,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: master
-      # 设置Flutter环境
+      # 设置 Flutter 环境
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -238,17 +254,19 @@ jobs:
         run: |
           cd simple_live_app
           flutter pub get
-      # 设置flutter_distributor环境
+      # 设置 flutter_distributor 环境
       - name: Install flutter_distributor
         run: dart pub global activate flutter_distributor
       # build Windows ZIP\MSIX
       - name: Build Windows
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'windows' }}
         run: |
           cd simple_live_app
           flutter_distributor package --platform windows --targets msix,zip --skip-clean
 
-      # 上传Windows至Artifacts
+      # 上传 Windows 至 Artifacts
       - name: Upload Windows APP to Artifacts
+        if: ${{ github.event.inputs.build_target == 'all' || github.event.inputs.build_target == 'windows' }}
         uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -267,7 +285,7 @@ jobs:
       - name: Echo version content
         run: echo "${{ fromJson(steps.version.outputs.content).version_desc }}"
 
-      #上传至Release
+      # 上传至 Release
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
@@ -279,5 +297,5 @@ jobs:
             simple_live_app/build/dist/*/*.msix
             simple_live_app/build/dist/*/*.zip
 
-      #完成
+      # 完成
       - run: echo "🍏 Windows job's status is ${{ job.status }}."
