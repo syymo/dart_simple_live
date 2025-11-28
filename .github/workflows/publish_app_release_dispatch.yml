@@ -1,11 +1,46 @@
 name: app-build-action
-#推送Tag时触发
+# 手动触发actions
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:  # 增加了手动触发功能
+    inputs:
+      build_target:
+        description: '选择构建的目标平台'
+        required: true
+        default: 'all'  # 默认值为 all，表示构建所有平台
+        options:
+          - macos
+          - linux
+          - windows
+          - ios
+          - android
+          - all  # 可以选择构建所有平台
+      release_tag:
+        description: '发布用的 tag（输入已存在的 tag, 例如 v1.2.3）'
+        required: true
 jobs:
+  # 新增：Tag校验，只执行一次
+  validate-tag:
+    runs-on: ubuntu-latest
+    steps:
+      #签出代码，保证能获取tag列表
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      #校验tag是否存在（最小改动：用 github.event.inputs.release_tag）
+      - name: 校验当前输入的 tag 是否存在
+        run: |
+          git fetch --tags
+          cur_tag="${{ github.event.inputs.release_tag }}"
+          if git tag --list | grep -qx "$cur_tag"; then
+            echo "✅ Tag found: $cur_tag"
+          else
+            echo "❌ Tag not found: $cur_tag"
+            exit 1
+          fi
+
+  # 打包 macOS、iOS 和 Android
   build-mac-ios-android:
+    needs: validate-tag  # 依赖tag校验，校验通过才运行
     runs-on: macos-latest
     permissions:
       contents: write
@@ -131,6 +166,7 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event.inputs.release_tag }}
           name: "${{ fromJson(steps.version.outputs.content).version }}"
           body: "${{ fromJson(steps.version.outputs.content).version_desc }}"
           prerelease: ${{ fromJson(steps.version.outputs.content).prerelease }}
@@ -147,6 +183,7 @@ jobs:
 
   # 打包Linux
   build-linux:
+    needs: validate-tag  # 依赖tag校验，校验通过才运行
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -206,6 +243,7 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event.inputs.release_tag }}
           name: "${{ fromJson(steps.version.outputs.content).version }}"
           body: "${{ fromJson(steps.version.outputs.content).version_desc }}"
           prerelease: ${{ fromJson(steps.version.outputs.content).prerelease }}
@@ -218,6 +256,7 @@ jobs:
 
   # 打包Windows
   build-windows:
+    needs: validate-tag  # 依赖tag校验，校验通过才运行
     runs-on: windows-latest
     permissions:
       contents: write
@@ -271,6 +310,7 @@ jobs:
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.event.inputs.release_tag }}
           name: "${{ fromJson(steps.version.outputs.content).version }}"
           body: "${{ fromJson(steps.version.outputs.content).version_desc }}"
           prerelease: ${{ fromJson(steps.version.outputs.content).prerelease }}
